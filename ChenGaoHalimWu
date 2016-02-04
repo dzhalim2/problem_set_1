@@ -1,0 +1,203 @@
+clear all
+
+ 
+
+set obs 100
+gen eta_c = rnormal(0, 1)
+gen D_cstar = rnormal(0, 1)
+gen D_c=0
+replace D_c=1 if D_cstar>0
+gen clusterid=_n
+expand 101
+gen epsilon_ic = rnormal(0, 1)
+gen Y_ic=D_c+eta_c+(D_c*eta_c)+ epsilon_ic
+ 
+*****1a*********
+reg Y_ic D_c
+ 
+*****1b*********
+reg Y_ic D_c,rob
+
+*****1c*********
+reg Y_ic D_c,cluster(clusterid)
+
+
+*****1d*********
+*you need cluster the se
+
+
+*****1e*********
+preserve
+collapse (mean) Y_ic D_c, by(clusterid)
+reg Y_ic D_c
+
+**roughly equals to the clustered se
+
+*****1f*********
+reg Y_ic D_c,vce(hc2) 
+reg Y_ic D_c,vce(hc3) 
+restore
+*****1g ab*********
+
+capture program drop dgp
+program define dgp,rclass
+ 
+drop _all
+set obs 100
+gen eta_c = rnormal(0, 1)
+gen D_cstar = rnormal(0, 1)
+gen D_c=0
+replace D_c=1 if D_cstar>0
+gen clusterid=_n
+expand 101
+gen epsilon_ic = rnormal(0, 1)
+gen Y_ic=D_c+eta_c+(D_c*eta_c)+ epsilon_ic
+reg Y_ic D_c
+*reg Y_ic D_c,cluster(clusterid)
+test D=1
+return scalar reject=r(p)<0.05
+end
+set seed 1234
+
+simulate reject=r(reject) , reps(1000) nodots: dgp
+
+*****1g cde*********
+
+capture program drop dgp
+program define dgp,rclass
+ 
+drop _all
+set obs 100
+gen eta_c = rnormal(0, 1)
+gen D_cstar = rnormal(0, 1)
+gen D_c=0
+replace D_c=1 if D_cstar>0
+gen clusterid=_n
+expand 101
+gen epsilon_ic = rnormal(0, 1)
+gen Y_ic=D_c+eta_c+(D_c*eta_c)+ epsilon_ic
+collapse (mean) Y_ic D_c, by(clusterid)
+reg Y_ic D_c  //c
+*reg Y_ic D_c ,rob //c
+*reg Y_ic D_c,vce(hc2) 
+ 
+test D=1
+return scalar reject=r(p)<0.05
+end
+set seed 1234
+
+simulate reject=r(reject) , reps(1000) nodots: dgp
+
+***2
+cd "***"
+import delimited "PSET1-2016 ", delimiter(comma) varnames(1) clear 
+
+***2a)
+preserve
+drop if missing(treat)
+bysort treat: outreg2 using summary, sum(log) tex eqkeep(N mean sd)
+ttest age, by(treat)
+ttest female, by(treat)
+ttest vote00, by(treat)
+ttest vote98, by(treat)
+ttest persons, by(treat)
+ttest newreg, by(treat)
+restore
+
+***2b)
+reg vote02 contact,rob
+reg contact treat_real
+predict e_hat,res
+reg vote02 contact e_hat
+ivregress 2sls vote02 (contact=treat_real)
+***2d)
+logit contact age female  vote98 vote00 newreg
+predict p
+kdensity p, recast(line)
+
+
+histogram p, frequency kdensity
+
+histogram p, frequency kdensity kdenopts(width(0.05))
+
+histogram p, frequency kdensity kdenopts(triangle)
+
+twoway (kdensity p if contact==1, recast(line)) ///
+(kdensity p if contact==0, recast(line))
+***iii
+/*
+gen newweight=p/(1-p)
+reg vote02 contact [w=newweight],r
+
+eststo regiii
+*/
+* d)
+logit contact age female vote98 vote00 persons newreg
+predict ps
+
+twoway (kdensity ps)(kdensity ps, bwidth(0.05))(kdensity ps, kernel(tri)),legend(label(1 "Epanechnikov") label(2 "Epanechnikov (bandwidth 0.05)") label(3 Triangle)) xtitle("Propensity Score") ytitle("Density") 
+graph save Graph "kdensity.gph"
+
+twoway (kdensity ps if contact==1)(kdensity ps if contact==0),legend(label(1 "Contacted") label(2 "Not Contacted")) xtitle("Propensity Score") ytitle("Density") 
+graph save Graph "kdensity2.gph"
+
+histogram ps, frequency kdensity
+histogram ps, frequency kdensity kdenopts(width(0.05))
+histogram ps, frequency kdensity kdenopts(triangle)
+
+
+***iii
+egen a = mean(vote02) if contact==1
+gen b1= vote02*(p/(1 - p)) if contact==0 
+gen b2= (p/(1 - p)) if contact==0 
+gen b=sum(b1)/sum(b2) if contact==0
+egen amean=mean(a)
+egen bmean=mean(b)
+gen betahat=amean-bmean
+
+
+
+gen newweight=ps/(1-ps)
+reg vote02 contact [w=newweight],rob
+
+***iv
+gen lam = contact + (1-contact)*p/(1-p)
+reg vote02 contact [w=lam],rob
+
+eststo regiv
+***v
+***Reduced dimensionality, but still have computational problem. So the result
+***is not reported.
+teffects nnmatch (vote02 vote00 ) contact   
+*eststo regv1
+logit contact   vote00  
+predict p_2
+teffects nnmatch (vote02 p_2 ) contact
+*eststo regv2
+***vi
+attnd vote02 contact ,pscore(p) boot
+*eststo regvi1
+egen p_interval = cut(p), group(100) 
+atts vote02 contact ,pscore(p) blockid(p_interval) boot
+*eststo regvi2
+attr vote02 contact ,pscore(p) radius(0.01) boot
+*eststo regvi3
+attk vote02 contact ,pscore(p) boot
+*eststo regvi4
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
